@@ -6,7 +6,6 @@ import (
 	"log"
 	"net"
 	"strings"
-	"time"
 )
 
 type MsgType int
@@ -83,22 +82,17 @@ func NewLutron(hostName, inventoryPath string) *Lutron {
 
 // TODO make private when watch done
 // pulls from channel until it finds response
-// may just move to fully blocking channel fetch
 func (l *Lutron) GetResponse() (r string, err error) {
 	for {
-		select {
-		case r = <-l.Responses:
-			// ignore zero length blank responses
-			if len(r) > 0 {
-				fmt.Println("popped ", r)
-				// ignore GNET prompts
-				if string(r[:1]) == "~" {
-					return r, nil
-				}
+		r = <-l.Responses
+		// ignore zero length blank responses
+		if len(r) > 0 {
+			fmt.Println("popped ", r)
+			// ignore GNET prompts
+			if string(r[:1]) == "~" {
+				return r, nil
 			}
-		default:
-			fmt.Println("no activity")
-			time.Sleep(100 * time.Millisecond)
+			// else continue
 		}
 	}
 }
