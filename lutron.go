@@ -5,7 +5,11 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"regexp"
+	"strconv"
 	"strings"
+
+	"github.com/cskr/pubsub"
 )
 
 type MsgType int
@@ -19,9 +23,10 @@ const (
 )
 
 const (
-	Output Command = "OUTPUT"
-	Device Command = "DEVICE"
-	Group  Command = "GROUP"
+	Output  Command = "OUTPUT"
+	Device  Command = "DEVICE"
+	Group   Command = "GROUP"
+	Unknown Command = "UNKNOWN"
 )
 
 type Lutron struct {
@@ -35,6 +40,7 @@ type Lutron struct {
 	Responses chan string
 	done      chan bool
 	inventory Inventory
+	broker    *pubsub.PubSub
 }
 
 type LutronMsg struct {
@@ -53,6 +59,13 @@ type LutronMsg struct {
 	// Action Number - default to 1 for now
 }
 
+type ResponseWatcher struct {
+	matchMsg  *LutronMsg
+	incomming chan interface{}
+	Responses chan<- *LutronMsg
+	stop      chan bool
+}
+
 // custom io scanner splitter
 // splits on either '>' or '\n' as depending on whether
 // the session is at a prompt - or just sent a change event
@@ -68,6 +81,7 @@ func lutronSplitter(data []byte, atEOF bool) (advance int, token []byte, err err
 
 func NewLutron(hostName, inventoryPath string) *Lutron {
 	inv := NewCasetaInventory(inventoryPath)
+
 	l := &Lutron{
 		hostName:  hostName,
 		Port:      "23",
@@ -77,6 +91,7 @@ func NewLutron(hostName, inventoryPath string) *Lutron {
 		done:      make(chan bool),
 		inventory: inv,
 	}
+	l.broker = pubsub.New(10)
 	return l
 }
 
@@ -123,12 +138,48 @@ func (l *Lutron) Connect() error {
 	scanner := bufio.NewScanner(l.conn)
 	scanner.Split(lutronSplitter)
 	go func() {
+		re := regexp.MustCompile(`^~(?P<command>[^,]+),(?P<id>\d+),(?P<action>\d+)(?:,(?P<value>\d+\.\d+))?$`)
 		for scanner.Scan() {
+			scannedMsg := strings.TrimSpace(scanner.Text())
 			select {
 			case <-l.done:
 				return
-			case l.Responses <- strings.TrimSpace(scanner.Text()):
+			case l.Responses <- scannedMsg:
 			}
+			response := &LutronMsg{}
+			groups := re.FindStringSubmatch(scannedMsg)
+			if len(groups) == 0 {
+				continue
+			}
+			lutronItems := make(map[string]string)
+
+			fmt.Printf("%v\n", groups)
+			for i, name := range re.SubexpNames() {
+				if i > 0 && i <= len(groups) {
+					lutronItems[name] = groups[i]
+				}
+			}
+			fmt.Println(lutronItems)
+			switch lutronItems["command"] {
+			case "OUTPUT":
+				response.Cmd = Output
+			case "DEVICE":
+				response.Cmd = Device
+			default:
+				response.Cmd = Unknown
+			}
+			// response.Cmd = lutronItems["command"]
+			// response.Cmd = "OUTPUT".(Command)
+			response.Id, err = strconv.Atoi(lutronItems["id"])
+			if err != nil {
+				log.Println(err.Error())
+			}
+			response.Type = Response
+			response.Name, err = l.inventory.NameFromId(response.Id)
+			if err != nil {
+				log.Println(err.Error())
+			}
+			l.broker.Pub(response, "responses")
 		}
 	}()
 	return nil
@@ -157,6 +208,29 @@ func (l *Lutron) SetByName(name string, level float64) error {
 func (l *Lutron) Send(msg string) error {
 	fmt.Fprintf(l.conn, msg+"\n")
 	return nil
+}
+
+func (l *Lutron) Watch(c *LutronMsg) (responses chan<- *LutronMsg, stop chan bool) {
+	watcher := &ResponseWatcher{
+		matchMsg: c,
+	}
+	watcher.incomming = make(chan interface{})
+	watcher.Responses = make(chan<- *LutronMsg)
+	watcher.stop = make(chan bool)
+	l.broker.AddSub(watcher.incomming, "responses")
+	go func() {
+		select {
+		case msg := <-watcher.incomming:
+			// match msg
+			watcher.Responses <- msg.(*LutronMsg)
+		case <-watcher.stop:
+			l.broker.Unsub(watcher.incomming, "responses")
+			close(watcher.Responses)
+			return
+		}
+
+	}()
+	return watcher.Responses, watcher.stop
 }
 
 func (l *Lutron) SendCommand(c *LutronMsg) (resp string, err error) {
