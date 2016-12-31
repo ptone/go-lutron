@@ -62,7 +62,7 @@ type LutronMsg struct {
 type ResponseWatcher struct {
 	matchMsg  *LutronMsg
 	incomming chan interface{}
-	Responses chan<- *LutronMsg
+	Responses chan *LutronMsg
 	stop      chan bool
 }
 
@@ -210,12 +210,12 @@ func (l *Lutron) Send(msg string) error {
 	return nil
 }
 
-func (l *Lutron) Watch(c *LutronMsg) (responses chan<- *LutronMsg, stop chan bool) {
+func (l *Lutron) Watch(c *LutronMsg) (responses chan *LutronMsg, stop chan bool) {
 	watcher := &ResponseWatcher{
 		matchMsg: c,
 	}
-	watcher.incomming = make(chan interface{})
-	watcher.Responses = make(chan<- *LutronMsg)
+	watcher.incomming = make(chan interface{}, 5)
+	watcher.Responses = make(chan *LutronMsg, 5)
 	watcher.stop = make(chan bool)
 	l.broker.AddSub(watcher.incomming, "responses")
 	go func() {
