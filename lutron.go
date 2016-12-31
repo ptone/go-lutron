@@ -87,7 +87,7 @@ func NewLutron(hostName, inventoryPath string) *Lutron {
 		Port:      "23",
 		Username:  "lutron",
 		Password:  "integration",
-		Responses: make(chan string),
+		Responses: make(chan string, 5),
 		done:      make(chan bool),
 		inventory: inv,
 	}
@@ -102,7 +102,8 @@ func (l *Lutron) GetResponse() (r string, err error) {
 		r = <-l.Responses
 		// ignore zero length blank responses
 		if len(r) > 0 {
-			fmt.Println("popped ", r)
+			// TODO turn to logging
+			// fmt.Println("popped ", r)
 			// ignore GNET prompts
 			if string(r[:1]) == "~" {
 				return r, nil
@@ -121,6 +122,7 @@ func (l *Lutron) Connect() error {
 	l.conn = conn
 	loginReader := bufio.NewReader(l.conn)
 	l.reader = loginReader
+	// TODO turn to logging
 	fmt.Printf("Connection established between %s and localhost.\n", l.hostName)
 	fmt.Printf("Local Address : %s \n", l.conn.LocalAddr().String())
 	fmt.Printf("Remote Address : %s \n", l.conn.RemoteAddr().String())
@@ -141,6 +143,7 @@ func (l *Lutron) Connect() error {
 		re := regexp.MustCompile(`^~(?P<command>[^,]+),(?P<id>\d+),(?P<action>\d+)(?:,(?P<value>\d+\.\d+))?$`)
 		for scanner.Scan() {
 			scannedMsg := strings.TrimSpace(scanner.Text())
+			// fmt.Printf("scannedMsg: %v\n", scannedMsg)
 			select {
 			case <-l.done:
 				return
@@ -153,13 +156,13 @@ func (l *Lutron) Connect() error {
 			}
 			lutronItems := make(map[string]string)
 
-			fmt.Printf("%v\n", groups)
+			// fmt.Printf("%v\n", groups)
 			for i, name := range re.SubexpNames() {
 				if i > 0 && i <= len(groups) {
 					lutronItems[name] = groups[i]
 				}
 			}
-			fmt.Println(lutronItems)
+			// fmt.Println(lutronItems)
 			switch lutronItems["command"] {
 			case "OUTPUT":
 				response.Cmd = Output
@@ -176,9 +179,11 @@ func (l *Lutron) Connect() error {
 			}
 			response.Type = Response
 			response.Name, err = l.inventory.NameFromId(response.Id)
+			response.Level, _ = strconv.ParseFloat(lutronItems["value"], 64)
 			if err != nil {
 				log.Println(err.Error())
 			}
+			fmt.Printf("publishing %+v\n", response)
 			l.broker.Pub(response, "responses")
 		}
 	}()
@@ -219,14 +224,16 @@ func (l *Lutron) Watch(c *LutronMsg) (responses chan *LutronMsg, stop chan bool)
 	watcher.stop = make(chan bool)
 	l.broker.AddSub(watcher.incomming, "responses")
 	go func() {
-		select {
-		case msg := <-watcher.incomming:
-			// match msg
-			watcher.Responses <- msg.(*LutronMsg)
-		case <-watcher.stop:
-			l.broker.Unsub(watcher.incomming, "responses")
-			close(watcher.Responses)
-			return
+		for {
+			select {
+			case msg := <-watcher.incomming:
+				// match msg
+				watcher.Responses <- msg.(*LutronMsg)
+			case <-watcher.stop:
+				l.broker.Unsub(watcher.incomming, "responses")
+				close(watcher.Responses)
+				return
+			}
 		}
 
 	}()
