@@ -55,6 +55,10 @@ type LutronMsg struct {
 	Type MsgType
 	// the integration command type - Output, Device
 	Cmd Command
+	// usually the button press
+	Action int
+	// in Unix nanos format
+	Timestamp int64
 	// TODO
 	// Action Number - default to 1 for now
 }
@@ -140,18 +144,28 @@ func (l *Lutron) Connect() error {
 	scanner := bufio.NewScanner(l.conn)
 	scanner.Split(lutronSplitter)
 	go func() {
-		re := regexp.MustCompile(`^~(?P<command>[^,]+),(?P<id>\d+),(?P<action>\d+)(?:,(?P<value>\d+\.\d+))?$`)
+		re := regexp.MustCompile(
+			// ^~(?P<command>[^,]+),(?P<id>\d+),(?P<action>\d+)(?:,(?P<value>\d+(?:\.\d+)?))?$
+			`^~(?P<command>[^,]+),` + // the the commmand
+				`(?P<id>\d+),` +
+				`(?P<action>\d+)` +
+				`(?:,(?P<value>\d+` + //values are optional
+				`(?:\.\d+)?` + // not all values are floats
+				`))?$`) // end optional value capture
 		for scanner.Scan() {
 			scannedMsg := strings.TrimSpace(scanner.Text())
 			// fmt.Printf("scannedMsg: %v\n", scannedMsg)
 			select {
 			case <-l.done:
 				return
-			case l.Responses <- scannedMsg:
+			// case l.Responses <- scannedMsg:
+			default:
+				fmt.Println(scannedMsg)
 			}
 			response := &LutronMsg{}
 			groups := re.FindStringSubmatch(scannedMsg)
 			if len(groups) == 0 {
+				// fmt.Println("no groups")
 				continue
 			}
 			lutronItems := make(map[string]string)
@@ -174,6 +188,7 @@ func (l *Lutron) Connect() error {
 			// response.Cmd = lutronItems["command"]
 			// response.Cmd = "OUTPUT".(Command)
 			response.Id, err = strconv.Atoi(lutronItems["id"])
+			response.Action, err = strconv.Atoi(lutronItems["action"])
 			if err != nil {
 				log.Println(err.Error())
 			}
@@ -183,7 +198,7 @@ func (l *Lutron) Connect() error {
 			if err != nil {
 				log.Println(err.Error())
 			}
-			fmt.Printf("publishing %+v\n", response)
+			// fmt.Printf("publishing %+v\n", response)
 			l.broker.Pub(response, "responses")
 		}
 	}()
@@ -268,7 +283,7 @@ func (l *Lutron) SendCommand(c *LutronMsg) (resp string, err error) {
 	if c.Fade > 0.0 {
 		cmd = fmt.Sprintf("%s,%.2f", cmd, c.Fade)
 	}
-	fmt.Println("debug: ", cmd)
+	// fmt.Println("debug: ", cmd)
 	l.Send(cmd)
 	return l.GetResponse()
 }
