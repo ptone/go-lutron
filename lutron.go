@@ -47,7 +47,7 @@ type LutronMsg struct {
 	// the lutron component number
 	Id    int
 	Name  string
-	Level float64
+	Value float64
 	// duration in seconds for a set action
 	// TODO parse > 60 seconds into string "M:SS"
 	Fade float64
@@ -179,7 +179,7 @@ func (l *Lutron) Connect() error {
 			}
 			response.Type = Response
 			response.Name, err = l.inventory.NameFromId(response.Id)
-			response.Level, _ = strconv.ParseFloat(lutronItems["value"], 64)
+			response.Value, _ = strconv.ParseFloat(lutronItems["value"], 64)
 			if err != nil {
 				log.Println(err.Error())
 			}
@@ -257,7 +257,7 @@ func (l *Lutron) SendCommand(c *LutronMsg) (resp string, err error) {
 		cmd = fmt.Sprintf("?%s,%d,1", c.Cmd, c.Id)
 		// TODO confirm level and fade are 0
 	case Set:
-		cmd = fmt.Sprintf("#%s,%d,1,%.2f", c.Cmd, c.Id, c.Level)
+		cmd = fmt.Sprintf("#%s,%d,1,%.2f", c.Cmd, c.Id, c.Value)
 	case Watch:
 		// TODO
 		// create mechanism to add a fmt.scanner on responses in a goroutine

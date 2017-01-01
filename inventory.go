@@ -29,6 +29,7 @@ type CasetaInventory struct {
 func NewCasetaInventory(path string) *CasetaInventory {
 	jsonfile, err := os.Open(path)
 	if err != nil {
+		// TODO return error - or fail more aggresively
 		fmt.Println("opening file", err.Error())
 	}
 	inventory := &CasetaInventory{}
@@ -64,7 +65,7 @@ func (i *CasetaInventory) IdFromName(n string) (id int, err error) {
 			return e.ID, nil
 		}
 	}
-	return 0, errors.New("no item with expected id")
+	return 0, errors.New("no item with expected name")
 }
 
 type Inventory interface {
