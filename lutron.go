@@ -30,14 +30,12 @@ const (
 )
 
 type Lutron struct {
-	hostName string
-	Port     string
-	conn     net.Conn
-	reader   *bufio.Reader
-	Username string
-	Password string
-	// TODO make private and expect watch requests to get access to responses
-	Responses chan string
+	hostName  string
+	Port      string
+	conn      net.Conn
+	reader    *bufio.Reader
+	Username  string
+	Password  string
 	done      chan bool
 	inventory Inventory
 	broker    *pubsub.PubSub
@@ -87,34 +85,16 @@ func NewLutron(hostName, inventoryPath string) *Lutron {
 	inv := NewCasetaInventory(inventoryPath)
 
 	l := &Lutron{
-		hostName:  hostName,
-		Port:      "23",
-		Username:  "lutron",
-		Password:  "integration",
-		Responses: make(chan string, 5),
+		hostName: hostName,
+		Port:     "23",
+		Username: "lutron",
+		Password: "integration",
+		// Responses: make(chan string, 5),
 		done:      make(chan bool),
 		inventory: inv,
 	}
 	l.broker = pubsub.New(10)
 	return l
-}
-
-// TODO make private when watch done
-// pulls from channel until it finds response
-func (l *Lutron) GetResponse() (r string, err error) {
-	for {
-		r = <-l.Responses
-		// ignore zero length blank responses
-		if len(r) > 0 {
-			// TODO turn to logging
-			// fmt.Println("popped ", r)
-			// ignore GNET prompts
-			if string(r[:1]) == "~" {
-				return r, nil
-			}
-			// else continue
-		}
-	}
 }
 
 func (l *Lutron) Connect() error {
@@ -227,6 +207,7 @@ func (l *Lutron) SetByName(name string, level float64) error {
 
 func (l *Lutron) Send(msg string) error {
 	fmt.Fprintf(l.conn, msg+"\n")
+	// TODO return meaningful error
 	return nil
 }
 
@@ -281,9 +262,17 @@ func (l *Lutron) SendCommand(c *LutronMsg) (resp string, err error) {
 	}
 
 	if c.Fade > 0.0 {
+		// TODO - longer fades don't expose themselves well in the integration
+		// the final value is reported for the item immediately on the sending
+		// of the command. So if you set a light to dim from 100 to 10 over 20
+		// seconds, the light reports out at 10 immediately. The way to perhaps
+		// to approximate (as an option) is to manage the fade here, with a ticker
 		cmd = fmt.Sprintf("%s,%.2f", cmd, c.Fade)
 	}
 	// fmt.Println("debug: ", cmd)
+	// TODO need to decide how to capture and bubble up either
+	// transport/connection errors, or semantic lighting errors
 	l.Send(cmd)
-	return l.GetResponse()
+	fmt.Println("sent ", cmd)
+	return "", nil
 }
