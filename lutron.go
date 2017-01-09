@@ -236,6 +236,10 @@ func (l *Lutron) Watch(c *LutronMsg) (responses chan *LutronMsg, stop chan bool)
 	return watcher.Responses, watcher.stop
 }
 
+func (l *Lutron) NameFromId(i int) (string, error) {
+	return l.inventory.NameFromId(i)
+}
+
 func (l *Lutron) SendCommand(c *LutronMsg) (resp string, err error) {
 	var cmd string
 	if c.Id == 0 {
